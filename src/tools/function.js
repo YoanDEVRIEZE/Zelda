@@ -6,11 +6,11 @@ export function createRigidBodyFixed(mesh, physic) {
     const collider = createColliderGeo(mesh.geometry, rigidBody, physic);
 }
 
-export function createRigidBodyEntity(position, physic) {
+export function createRigidBodyEntity(position, physic, radius = 0.25) {
     const safePos = { x: position?.x ?? 0, y: position?.y ?? 2, z: position?.z ?? 0 };
     const rbDesc = RigidBodyDesc.dynamic().setTranslation(safePos.x, safePos.y, safePos.z);
     const rigidBody = physic.createRigidBody(rbDesc);
-    const collider = createColliderBall(0.25, rigidBody, physic);
+    const collider = createColliderBall(radius, rigidBody, physic);
 
     return { rigidBody, collider };
 }

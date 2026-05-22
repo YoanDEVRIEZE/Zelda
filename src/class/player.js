@@ -26,6 +26,11 @@ const WARD = '/sound/shield.wav';
 
 const STEP_R = {grass: GRASS_R, stone: STONE_R, wood: WOOD_R, dirt: DIRT_R};
 const STEP_L = {grass: GRASS_L, stone: STONE_L, wood: WOOD_L, dirt: DIRT_L};
+const ATTACK_RANGE = 1.7;
+const ATTACK_ARC = Math.PI * 0.8;
+const HIT_RECOVERY = 0.5;
+
+const tempVector = new Vector3();
 
 export default class Player extends Object3D {
     rigidBody = null;
@@ -36,6 +41,9 @@ export default class Player extends Object3D {
     wasAttacking = false;
     wasLocking = false;
     ground = null;
+    health = 5;
+    hitCooldown = 0;
+    pendingHit = false;
 
     constructor(mesh, physic) {
         super();
@@ -82,14 +90,20 @@ export default class Player extends Object3D {
         this.collider = collider;
     }
 
-    update(dt, areas) {
+    update(dt, areas, enemies = []) {
+        this.hitCooldown = Math.max(0, this.hitCooldown - dt);
         this.updatePhysic();
         this.updateVisual(dt);
         this.updateAnimation(dt);
         this.updateGround(areas);
+        this.tryHitEnemies(enemies);
     }
 
     updatePhysic() {
+        if (this.hitCooldown > 0) {
+            return;
+        }
+
         const inputX = this.ctrl.x;
         const inputZ = this.ctrl.z;
         const length = Math.hypot(inputX, inputZ) || 1;
@@ -110,14 +124,16 @@ export default class Player extends Object3D {
     updateAnimation(dt) {
         const attacking = this.animator.isPlaying(ATTACK);
         const lockPressed = this.ctrl.lock;
-        const shieldPressed = !attacking && lockPressed;
+        const shieldPressed = !attacking && this.hitCooldown === 0 && lockPressed;
         this.wasLocking = lockPressed;
 
         const attackPressed = !shieldPressed && this.ctrl.attack;
         const attackTriggered = attackPressed && !this.wasAttacking;
         this.wasAttacking = attackPressed;
 
-        if(attacking) {
+        if(this.hitCooldown > 0) {
+            this.animator.play(IDLE)
+        } else if(attacking) {
             this.animator.play(ATTACK)
         } else if(shieldPressed) {
             this.animator.play(SHIELD)
@@ -133,6 +149,7 @@ export default class Player extends Object3D {
 
     syncAnimSound() {
         this.animator.on(ATTACK, 'half', () => {
+            this.pendingHit = true;
             this.sound.play(YELL)
         });
         this.animator.on(RUN, 'loop', () => {
@@ -155,5 +172,51 @@ export default class Player extends Object3D {
                 break;
             }
         }
+    }
+
+    tryHitEnemies(enemies) {
+        if (!this.pendingHit) return;
+
+        this.pendingHit = false;
+        for (const enemy of enemies) {
+            if (!enemy?.alive) continue;
+            if (this.canHit(enemy)) {
+                enemy.takeHit(this.position);
+                break;
+            }
+        }
+    }
+
+    canHit(enemy) {
+        tempVector.subVectors(enemy.position, this.position);
+        tempVector.y = 0;
+
+        if (tempVector.length() > ATTACK_RANGE) {
+            return false;
+        }
+
+        const facing = new Vector3(0, 0, 1).applyAxisAngle(new Vector3(0, 1, 0), this.rotation.y);
+        return facing.angleTo(tempVector.normalize()) <= ATTACK_ARC / 2;
+    }
+
+    takeHit(from) {
+        if (this.hitCooldown > 0) return false;
+
+        this.health -= 1;
+        this.hitCooldown = HIT_RECOVERY;
+
+        tempVector.subVectors(this.position, from);
+        tempVector.y = 0;
+
+        if (tempVector.lengthSq() > 0) {
+            tempVector.normalize().multiplyScalar(2.5);
+            this.rigidBody.setLinvel({
+                x: tempVector.x,
+                y: this.rigidBody.linvel().y,
+                z: tempVector.z,
+            }, true);
+        }
+
+        return true;
     }
 }
